@@ -33,10 +33,9 @@ time_means_path = "E:/ccai_demo/additional/stats_v0/time_means.npy"
 land_sea_mask_path = "E:/ccai_demo/additional/stats_v0/land_sea_mask.npy"
 config_file = "E:/FourCastNet/config/AFNO.yaml"
 config_name = "afno_backbone"
-lora_path=r'"D:\Documents\课程\AI基础\LoRA"'
 model_key="model_state"
 params = YParams(config_file, config_name)
-finetuned_checkpoint_path=r'E:\pending_models\finetuned_model_best_202405-202407.pt'
+finetuned_checkpoint_path=r'E:\pending_models\finetuned_model_best.pt'
 user_agent = [
     "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_8; en-us) AppleWebKit/534.50 (KHTML, like Gecko) Version/5.1 "
     "Safari/534.50",
@@ -108,18 +107,70 @@ params.time_means = np.load(time_means_path)[0, out_channels]
 mcp = FastMCP(
     name="WeatherForecastAssistant",
     instructions="""
-你是一个专业的天气预报助手。你的唯一信息来源是可用的工具。
-当被问及天气时，你必须遵守以下规则：
-1.  **绝对信任工具**：工具是连接到一个实时、高精度的物理预测模型。它返回的数据是关于指定日期的最准确预测，无论它看起来与你的内部知识是否相符。
-2.  **不要质疑**：永远不要因为工具返回的结果与你的预期不同而重复调用它。工具总是正确的。
-3.  **一次调用**：对于单日的天气查询，你必须且只能调用一次 工具。
-4.  **清晰回答**：在获得工具返回的温度列表后，你的任务是清晰地、人性化地将这些数据解读给用户，并明确指出这是哪一天的预报。
-例如，如果工具返回 `[18.5, 25.2, 22.1, 19.8]`，你应该回答：“好的，根据预测模型，明天（XX月XX日）的气温预报如下：凌晨约为18.5℃，中午升至25.2℃，傍晚降至22.1℃，午夜前后为19.8℃。”
-你可调用工具来完成风速，气温，湿度的预测
+你是一个专业、严谨的天气预报助手。你的唯一信息来源是你可用的工具，你必须完全信任工具返回的数据。
 
-当被问及时间时，你必须遵守如下规则：
-1. **绝对信任工具**：工具返回的数据是当天的日期
-        
+在响应用户请求前，你必须首先完成**第一步：识别用户意图**，并根据意图选择相应的处理流程。
+
+---
+**第一步：识别用户意图**
+
+你必须判断用户的请求属于以下哪一类：
+
+1.  **本地天气数据查询**: 用户想知道【某个特定地点】的【具体数值】（如北京，上海，西雅图）。
+    -   如果属于此类，请严格遵循【流程A】。
+
+2.  **全球气象图可视化**: 用户想看到一张【全球范围】的【气象图或地图】（如“画图”、“可视化”、“全球地图”等关键词）。
+    -   如果属于此类，请严格遵循【流程B】。
+
+---
+**【流程A：本地天气数据查询】**
+
+**你的任务是获取一个明确的目标日期和一个城市名，然后调用天气预报工具。**
+
+1.  **识别日期和城市**：从用户请求中识别出【相对日期】（如“今天”、“明天”）和【城市名称】。
+    -   如果缺少城市，必须向用户提问。
+
+2.  **计算最终日期 (核心逻辑)**：
+    -   **你的唯一日期工具是 `get_today`。**
+    -   如果用户问“今天”，直接使用 `get_today` 的结果。
+    -   如果用户问“明天”，你**必须**先调用一次 `get_today` 获取基准日期，然后在内部自己计算出明天的日期（例如，如果 `get_today` 返回 "2025-06-20"，那么“明天”就是 "2025-06-21"）。
+    -   如果用户问“后天”，逻辑同上，在 `get_today` 的结果上加两天。
+    -   **【绝对禁止】**：禁止在没有 `get_today` 作为基础的情况下凭空猜测日期。禁止向用户反问“今天是哪一天？”。
+
+3.  **调用核心天气工具**：
+    -   当你同时获得了【最终计算出的日期】和【城市名】后，**立即调用 `get_weather_forecast` 工具**。
+    -   对于同一个用户请求，此工具只允许调用一次。
+
+4.  **回答用户**：
+    -   整合 `get_weather_forecast` 工具返回的完整数据，清晰地回答用户。
+
+**示例思考过程 (对于“明天北京天气”):**
+1.  用户意图是本地查询。关键词：“明天”、“北京”。
+2.  我需要计算“明天”的日期。我的手册说必须用 `get_today`。
+3.  调用 `get_today()` -> 返回 "2025-06-20"。
+4.  我在脑中计算：明天 = "2025-06-20" + 1天 = "2025-06-21"。
+5.  我现在有日期 "2025-06-21" 和城市 "北京"。
+6.  材料齐全，立即调用 `get_weather_forecast(year=2025, month=6, day=21, city_name='北京')`。
+7.  收到预报结果，整理后回答用户。
+
+
+---
+**【流程B：全球气象图可视化】**
+
+1.  **确定日期 (自主行动)**:
+    -   **你的首要行动是确定目标日期。** 如果用户的请求包含“今天”、“明天”等相对时间，你**必须立即、主动地、无需向用户确认地调用 `get_today` 工具**。
+    -   使用 `get_today` 返回的日期作为基准，在内部计算出用户请求的最终日期（例如，“明天”）。
+    -   **【绝对禁止】**: 绝对禁止向用户反问“今天是哪一天”。获取当前日期是你自己的责任，必须通过调用工具来完成。
+2.  **确定变量**:
+    -   从用户的请求中解析出他们想要可视化的气象变量名，并匹配到 `draw` 工具 `varname` 参数最接近的选项。
+3.  **调用 `draw` 工具**:
+    -   使用你计算出的最终日期和确定的变量名，调用 `draw` 工具。
+    -   **【绝对禁止】**: 在此流程中，绝对禁止向用户询问城市名称。
+4.  **展示图片**:
+    -   `draw` 工具会返回一个图片路径，你的任务是向用户展示这张图片。
+
+---
+你的所有行为都必须严格遵循上述分类和流程。
     """,
 )
 device = torch.cuda.current_device() if torch.cuda.is_available() else 'cpu'
@@ -155,17 +206,11 @@ stds = params.stds
 
 def get_data_for_date(year, month, day):
     # 在真实的系统中，这里会根据年月日找到正确的文件
-    # 但根据你的代码，它总是返回同一个文件，我们先保留这个行为
-    # 重要的是，我们要知道这个文件代表的是哪一天的开始
-    # 假设 '2018.h5' 是从2018年1月1日00:00开始的
-    data_file_path = os.path.join(data_path, "era5_2025_03.h5")
+    # 这里做了简化
+    data_file_path = os.path.join(data_path, "era5_2025_06.h5")
     
-    # 计算从文件开始到我们目标日期的前一个时间点的总时间步数
-    # 这是一个简化逻辑，假设每月31天。真实系统需要用datetime库
-    # 我们要预测第 `day` 天，需要第 `day-1` 天的数据作为初始场
-    # (day-1) 意味着过去了多少天，每天4个时间步
-    # 例如，要预测day=1，需要ic=0。要预测day=2，需要ic=4...
-    initial_condition_timestep = (day - 1) * 4 
+    # 同样出于演示目的进行简化
+    initial_condition_timestep = (day - 20) * 4 + 1
     
     return data_file_path, initial_condition_timestep
 
@@ -219,9 +264,9 @@ else:
 model = load_model(model, params, model_path)
 model = model.to(device)
 
-def preprocess(data_file: str, ic: int):
+def preprocess(data_file: str):
     # 只加载初始条件 (initial condition)
-    data = h5py.File(data_file, 'r')['fields'][ic, in_channels, 0:img_shape_x]
+    data = h5py.File(data_file, 'r')['fields'][0, in_channels, 0:img_shape_x]
     data = np.expand_dims(data, axis=0) # 增加一个 batch 维度, shape: (1, 20, 720, 1440)
     
     # 标准化数据
@@ -231,8 +276,7 @@ def preprocess(data_file: str, ic: int):
     data = torch.as_tensor(data).to(device, dtype=torch.float)
     return data
 
-def inference_global(initial_condition, model, prediction_length, idx):
-    # to conserve GPU mem, only save one channel (can be changed if sufficient GPU mem or move to CPU)
+def inference_global(initial_condition, model, prediction_length):
 
     predicted = None
     with torch.no_grad():
@@ -326,13 +370,12 @@ def inference_relative_humidity(year: int, month: int, day: int, city_name: str)
     r850_mean = means[r850_channel_index]
     r850_std = stds[r850_channel_index]
 
-    prediction_length = 4
 
     # 3. 获取数据文件和初始时间步
-    data_file, ic = get_data_for_date(year, month, day)
+    data_file, prediction_length = get_data_for_date(year, month, day)
     
     # 4. 预处理初始条件
-    initial_condition = preprocess(data_file, ic)
+    initial_condition = preprocess(data_file)
     
     # 5. 执行推理
     normalized_predictions = inference(initial_condition, model, prediction_length, r850_channel_index, lat_idx, lon_idx)
@@ -395,13 +438,11 @@ def inference_wind_info(year: int, month: int, day: int, city_name: str) -> List
     v10_mean = means[v10_channel_index]
     v10_std = stds[v10_channel_index]
 
-    prediction_length = 4
-
     # 1. 获取数据文件和初始时间步
-    data_file, ic = get_data_for_date(year, month, day)
+    data_file, prediction_length = get_data_for_date(year, month, day)
     
     # 2. 预处理初始条件
-    initial_condition = preprocess(data_file, ic)
+    initial_condition = preprocess(data_file)
     u10_idx=variables.index('u10')
     v10_idx=variables.index('v10')
     
@@ -450,7 +491,8 @@ def get_today()  -> str:
     Returns:
         str: 当前日期，格式为"年-月-日"
     """
-    return '2025-06-01'
+    return '2025-06-20'
+
 @mcp.tool()
 def inference_t2m(year :int, month :int, day :int,city_name :str) -> List[float]:
     """
@@ -483,10 +525,10 @@ def inference_t2m(year :int, month :int, day :int,city_name :str) -> List[float]
     prediction_length = 4  # 预测4个时间步 (00, 06, 12, 18点)
 
     # 1. 获取数据文件和初始时间步
-    data_file, ic = get_data_for_date(year, month, day)
+    data_file, prediction_length = get_data_for_date(year, month, day)
     
     # 2. 预处理初始条件 (只加载一个时间点)
-    initial_condition = preprocess(data_file, ic)
+    initial_condition = preprocess(data_file)
     
     # 3. 执行正确的自回归推理
     # 注意：inference现在返回的是归一化后的温度列表
@@ -558,39 +600,54 @@ def load_image(path: str) -> str:
     return "D:/example.png"
 
 @mcp.tool()
-def draw_t2m(year :int, month :int, day :int) -> str:
+def draw(year :int, month :int, day :int, varname: str) -> str:
     """
-    生成一个某日气温可视化图片，将其保存为文件，并返回该文件的绝对路径。
+    生成一个某日特定气象变量可视化图片，将其保存为文件，并返回该文件的绝对路径。
     这个函数不负责向用户展示图片。
     
     Args:
         year (int): 年份
         month (int): 月份
         day (int): 日期
+        varname (str): 待可视化的变量名，你需要将用户提供的变量名转换成最接近的气象变量名。可选值为：'u10','v10', 't2m', 'sp', 'msl', 't850', 'u1000', 'v1000', 'z1000', 'u850', 'v850', 'z850', 'u500', 'v500', 'z500', 't500', 'z50' , 'r500', 'r850', 'tcwv'
         
     Returns:
         str:  图片被保存到的完整路径。主程序（MCP）需要用这个路径来向用户展示图片。
     """
     
     # 1. 获取数据文件和初始时间步
-    data_file, ic = get_data_for_date(year, month, day)
+    data_file, prediction_length = get_data_for_date(year, month, day)
     
     # 2. 预处理初始条件 (只加载一个时间点)
-    initial_condition = preprocess(data_file, ic)
+    initial_condition = preprocess(data_file)
     
     # 3. 执行正确的自回归推理
     # 注意：inference现在返回的是归一化后的温度列表
-    normalized_temps_list = inference_global(initial_condition, model, 4, 2)
+    normalized_temps_list = inference_global(initial_condition, model, prediction_length)
     
-    show_hotmap(normalized_temps_list,2)
+    
+    channel_idx=variables.index(varname)
+    
+    show_hotmap(normalized_temps_list,channel_idx)
 
     return "D:/example.png"
 
 def show_hotmap(prediction,channel_idx):
-    # visualize spatiotemporal predictions
+    # 反归一化
+    mean = means[channel_idx]
+    std = stds[channel_idx]
+    
+    real_data = prediction[0, channel_idx] * std + mean  # 反标准化
+
+    # 绘图
     fig, ax = plt.subplots(nrows=1, ncols=1)
-    ax.imshow(prediction[0,channel_idx], cmap="bwr")
-    ax.set_title("FourCastNet prediction")
+    im = ax.imshow(real_data, cmap="bwr")
+    ax.set_title("FourCastNet Prediction")
+    
+    # 添加颜色条
+    cbar = fig.colorbar(im, ax=ax)
+
+    # plt.savefig("D:/example.png")
     plt.show()
 
 if __name__ == "__main__":
