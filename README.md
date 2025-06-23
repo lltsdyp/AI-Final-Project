@@ -1,5 +1,13 @@
 # 环境配置方法
 
+## 各个文件的作用
+
+- finetune.py 层冻结微调策略的微调脚本
+- model-test.ipynb 测试模型预测误差的可视化脚本，同时测试路径配置是否正确，这里的路径配置和mcp-server/main.py中的配置是一样的
+- nc_downloader.py 从ECWMF下载.nc数据文件的交互式脚本
+- nc_to_h5.py 将下载下来的nc文件转换成模型可以读取的h5文件时需要使用的脚本
+- mcp-server/main.py MCP服务器的主要逻辑
+
 ## 测试脚本
 路径配置写在notebook里面了
 
