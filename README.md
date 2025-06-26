@@ -8,6 +8,10 @@
 - nc_to_h5.py 将下载下来的nc文件转换成模型可以读取的h5文件时需要使用的脚本
 - mcp-server/main.py MCP服务器的主要逻辑
 
+## 数据集下载
+调用nc_downloader.py，该脚本会用交互式的方式来下载相应的数据集
+接着调用nc_to_h5.py，该脚本同样使用交互式的方式将Surface数据和Pressure Level数据进行合并，脚本中的基础文件名指的是下载下来的文件去掉_sfc.nc或者_pl.nc之后剩余的前缀
+
 ## 测试脚本
 路径配置写在notebook里面了
 
